@@ -73,7 +73,6 @@ class Decorative3DDataset(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.resolution = resolution
-        self.voxelizer = Voxelizer(resolution=resolution)
 
         # Buscar todos los archivos de modelo 3D
         self.model_paths = []
@@ -81,18 +80,19 @@ class Decorative3DDataset(Dataset):
         self.labels = []
 
         # Extensiones de archivo a considerar
-        valid_extensions = ['.obj', '.stl', '.ply']
+        valid_extensions = ['.npy']  # Solo buscamos archivos NPY procesados
 
+        # Buscar directamente todos los archivos .npy
         for root, _, files in os.walk(root_dir):
-            # Obtener la categoría basada en el nombre de la carpeta
-            rel_path = os.path.relpath(root, root_dir)
-            category = rel_path.split(os.sep)[0] if rel_path != '.' else 'uncategorized'
-
-            if category_filter and category not in category_filter:
-                continue
-
             for file in files:
-                if any(file.lower().endswith(ext) for ext in valid_extensions):
+                if file.lower().endswith(tuple(valid_extensions)):
+                    # Obtener la categoría basada en el nombre de la carpeta
+                    rel_path = os.path.relpath(root, root_dir)
+                    category = rel_path.split(os.sep)[0] if rel_path != '.' else 'uncategorized'
+
+                    if category_filter and category not in category_filter:
+                        continue
+
                     file_path = os.path.join(root, file)
                     self.model_paths.append(file_path)
                     self.categories.append(category)
@@ -111,23 +111,55 @@ class Decorative3DDataset(Dataset):
         category = self.categories[idx]
         label_idx = self.labels.index(category)
 
-        # Voxelizar el modelo
-        voxel_data = self.voxelizer.voxelize(model_path)
+        # Cargar datos voxelizados
+        try:
+            voxel_data = np.load(model_path)
 
-        # Añadir dimensión de canal (1 x resolution x resolution x resolution)
-        voxel_tensor = torch.tensor(voxel_data).float().unsqueeze(0)
+            # Si tiene más dimensiones de las esperadas, reducirlas
+            while voxel_data.ndim > 4:  # Esperamos [batch, channel, x, y, z]
+                voxel_data = voxel_data[0]
 
-        # Aplicar transformaciones si existen
-        if self.transform:
-            voxel_tensor = self.transform(voxel_tensor)
+            # Si falta la dimensión de canal, añadirla
+            if voxel_data.ndim == 3:
+                voxel_data = np.expand_dims(voxel_data, axis=0)
 
-        return {
-            'voxels': voxel_tensor,
-            'category': category,
-            'label_idx': label_idx,
-            'path': model_path
-        }
+            # Redimensionar a la resolución requerida
+            from scipy.ndimage import zoom
 
+            # Obtener dimensiones actuales y calcular factores de escala
+            _, current_x, current_y, current_z = voxel_data.shape
+            scale_x = self.resolution / current_x
+            scale_y = self.resolution / current_y
+            scale_z = self.resolution / current_z
+
+            # Aplicar redimensionamiento (no escalar dimensión de canal)
+            if scale_x != 1.0 or scale_y != 1.0 or scale_z != 1.0:
+                voxel_data = zoom(voxel_data, (1, scale_x, scale_y, scale_z), order=1)
+
+            # Convertir a tensor
+            voxel_tensor = torch.tensor(voxel_data).float()
+
+            # Aplicar transformaciones si existen
+            if self.transform:
+                voxel_tensor = self.transform(voxel_tensor)
+
+            return {
+                'voxels': voxel_tensor,
+                'category': category,
+                'label_idx': label_idx,
+                'path': model_path
+            }
+
+        except Exception as e:
+            print(f"Error al cargar {model_path}: {e}")
+            # Devolver un tensor vacío en caso de error
+            voxel_tensor = torch.zeros((1, self.resolution, self.resolution, self.resolution))
+            return {
+                'voxels': voxel_tensor,
+                'category': category,
+                'label_idx': label_idx,
+                'path': model_path
+            }
 
 def create_dataloader(root_dir, batch_size=16, resolution=32, category_filter=None):
     """

@@ -129,6 +129,17 @@ def train_vae(args):
             # Generar y guardar algunas muestras
             if args.save_samples:
                 save_samples(model, device, checkpoint_dir, epoch + 1, args.resolution)
+    # Reanudar desde checkpoint si se especifica
+    start_epoch = 0
+    if args.resume and args.checkpoint_path:
+        if os.path.exists(args.checkpoint_path):
+            checkpoint = torch.load(args.checkpoint_path)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch']
+            print(f"Reanudando entrenamiento desde época {start_epoch}")
+        else:
+            print(f"Advertencia: No se encontró el checkpoint en {args.checkpoint_path}")
 
     # Calcular tiempo total
     total_time = time.time() - start_time
@@ -138,6 +149,9 @@ def train_vae(args):
     final_model_path = os.path.join(checkpoint_dir, "final_model.pt")
     torch.save(model.state_dict(), final_model_path)
     print(f"Modelo final guardado en {final_model_path}")
+
+    parser.add_argument('--resume', action='store_true', help='Reanudar entrenamiento desde un checkpoint')
+    parser.add_argument('--checkpoint_path', type=str, default=None, help='Ruta al checkpoint para reanudar')
 
     # Guardar gráfica de pérdidas
     plt.figure(figsize=(10, 5))
@@ -237,6 +251,7 @@ def main():
     model, checkpoint_dir = train_vae(args)
 
     print(f"Entrenamiento completado. Resultados guardados en {checkpoint_dir}")
+
 
 
 if __name__ == "__main__":

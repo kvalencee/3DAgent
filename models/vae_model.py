@@ -22,7 +22,7 @@ class Conv3DBlock(nn.Module):
 class DeconvBlock(nn.Module):
     """Bloque de deconvolución 3D con normalización y activación."""
 
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=0):
         super(DeconvBlock, self).__init__()
         self.deconv = nn.ConvTranspose3d(
             in_channels, out_channels, kernel_size, stride, padding, output_padding
@@ -40,7 +40,7 @@ class DeconvBlock(nn.Module):
 class VoxelVAE(nn.Module):
     """Autoencoder Variacional para generación de modelos 3D voxelizados."""
 
-    def __init__(self, resolution=32, latent_dim=128):
+    def __init__(self, resolution=64, latent_dim=128):
         """
         Inicializa el VAE.
 
@@ -97,8 +97,9 @@ class VoxelVAE(nn.Module):
             if i == self.num_layers - 1:
                 out_channels = 1  # Último layer siempre con 1 canal
 
+            # Usamos tamaños específicos para asegurar que obtenemos exactamente la resolución deseada
             decoder_layers.append(
-                DeconvBlock(in_channels, out_channels, kernel_size=4, stride=2, padding=1, output_padding=1)
+                DeconvBlock(in_channels, out_channels, kernel_size=4, stride=2, padding=1, output_padding=0)
             )
             in_channels = out_channels
 
@@ -144,6 +145,16 @@ class VoxelVAE(nn.Module):
         # Pasar por capas del decoder
         for layer in self.decoder_layers:
             x = layer(x)
+
+        # Antes de la activación final, verifica y redimensiona si es necesario
+        # Esto asegura que la salida tenga exactamente el tamaño esperado
+        if x.size(2) != self.resolution or x.size(3) != self.resolution or x.size(4) != self.resolution:
+            x = F.interpolate(
+                x,
+                size=(self.resolution, self.resolution, self.resolution),
+                mode='trilinear',
+                align_corners=False
+            )
 
         # Activación final
         x = self.final_activation(x)
