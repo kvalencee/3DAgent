@@ -7,8 +7,9 @@ from sklearn.model_selection import train_test_split
 import random
 
 # Rutas
-voxels_dir = "C:\\Users\\keval\\OneDrive\\Documentos\\decorai\\data\\processed\\voxels"
-output_dir = "C:\\Users\\keval\\OneDrive\\Documentos\\decorai\\data\\training_ready"
+# Rutas
+voxels_dir = "C:\\Users\\Kevin Valencia\\Documents\\ESCOM\\DECORAI\\data\\processed"
+output_dir = "C:\\Users\\Kevin Valencia\\Documents\\ESCOM\\DECORAI\\data\\training_ready"
 train_dir = os.path.join(output_dir, "train")
 test_dir = os.path.join(output_dir, "test")
 

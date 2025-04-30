@@ -7,7 +7,7 @@ import zipfile
 from tqdm import tqdm
 
 
-def download_from_sketchfab(api_key, category="furniture", count=20, output_dir="data/sketchfab"):
+def download_from_sketchfab(api_key, category=None, keyword=None, count=20, output_dir="data/sketchfab"):
     """
     Descarga modelos 3D gratuitos de Sketchfab que tengan licencias permisivas.
 
@@ -34,9 +34,9 @@ def download_from_sketchfab(api_key, category="furniture", count=20, output_dir=
     # Filtrar solo modelos gratuitos con formato descargable
     url = "https://api.sketchfab.com/v3/models"
     params = {
-        "categories": category,
         "downloadable": True,
-        "count": 100  # Solicitar más para poder filtrar
+        "count": 100,  # Solicitar más para poder filtrar
+        "q": keyword  # Añadir parámetro de búsqueda
     }
 
     try:
@@ -148,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--category', type=str, default="furniture", help='Categoría de modelos')
     parser.add_argument('--count', type=int, default=20, help='Número de modelos a descargar')
     parser.add_argument('--output_dir', type=str, default="data/sketchfab", help='Directorio de salida')
+    parser.add_argument('--keyword', type=str, default=None, help='Palabra clave para búsqueda')
 
     args = parser.parse_args()
 

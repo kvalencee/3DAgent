@@ -220,6 +220,9 @@ def save_samples(model, device, output_dir, epoch, resolution, num_samples=5):
 def main():
     parser = argparse.ArgumentParser(description="Entrenamiento de VAE para modelos 3D")
 
+    parser.add_argument('--resume', action='store_true', help='Reanudar entrenamiento desde un checkpoint')
+    parser.add_argument('--checkpoint_path', type=str, default=None, help='Ruta al checkpoint para reanudar')
+
     # Directorios
     parser.add_argument('--data_dir', type=str, required=True, help='Directorio de datos')
     parser.add_argument('--output_dir', type=str, default='output', help='Directorio de salida')
