@@ -1,106 +1,142 @@
 import os
 import requests
+import json
 import time
 from tqdm import tqdm
+import backoff
 
 # Configuración
-API_KEY = "99d4a425f4be42a9aa29883e98ccbf17"
-OUTPUT_DIR = r"C:\Users\Kevin Valencia\Documents\ESCOM\DECORAI\data\vases_ai"
+API_KEY = "TU_API_KEY"  # Reemplaza con tu API key
+OUTPUT_DIR = "data/vases"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Configuración de búsqueda
-SEARCH_QUERIES = [
-    "vase",
-    "jarrón",
-    "flower pot",
+# Términos de búsqueda específicos para floreros
+SEARCH_TERMS = [
+    "vase flower",
     "ceramic vase",
-    "porcelain vase"
+    "decorative vase",
+    "modern vase",
+    "3d printable vase",
+    "flower pot",
+    "planter vase"
 ]
 
-# Filtros avanzados
+# Filtros para asegurar calidad
 PARAMS = {
     "downloadable": "true",
-    "staffpicked": "true",  # Solo modelos verificados
-    "min_face_count": "1000",  # Modelos detallados
-    "max_face_count": "20000",  # Evitar modelos demasiado complejos
-    "sort_by": "-likeCount",  # Los más populares primero
-    "count": "100"  # Máximo permitido por petición
+    "min_face_count": "2000",  # Asegurar suficiente detalle
+    "max_face_count": "50000",  # Evitar modelos demasiado complejos
+    "sort_by": "-likeCount",  # Preferir modelos populares
+    "count": "24",  # Resultados por página
+    "license": "cc0,cc-by"  # Solo licencias permisivas
 }
 
 
-def download_model(model_id):
-    """Descarga un modelo individual en formato .glb"""
-    try:
-        # Paso 1: Obtener URL de descarga
-        dl_url = f"https://api.sketchfab.com/v3/models/{model_id}/download"
-        headers = {"Authorization": f"Token {API_KEY}"}
-        response = requests.get(dl_url, headers=headers, timeout=30)
-        response.raise_for_status()
+@backoff.on_exception(backoff.expo, requests.exceptions.RequestException, max_tries=3)
+def get_models(search_term, offset=0):
+    """Obtiene modelos de la API de Sketchfab con reintento automático"""
+    url = "https://api.sketchfab.com/v3/models"
+    params = PARAMS.copy()
+    params["q"] = search_term
+    params["offset"] = offset
 
-        glb_url = response.json().get("glb", {}).get("url")
-        if not glb_url:
-            return False
-
-        # Paso 2: Descargar archivo
-        filename = f"vase_{model_id}.glb"
-        filepath = os.path.join(OUTPUT_DIR, filename)
-
-        with requests.get(glb_url, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            with open(filepath, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        return True
-
-    except Exception as e:
-        print(f"Error al descargar {model_id}: {str(e)[:100]}")
-        return False
-
-
-def fetch_vase_models():
-    """Busca modelos de jarrones con filtros estrictos"""
     headers = {"Authorization": f"Token {API_KEY}"}
-    downloaded = 0
-    seen_models = set()  # Para evitar duplicados
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+    response.raise_for_status()
+    return response.json()
 
-    for query in SEARCH_QUERIES:
-        print(f"\n🔍 Buscando: '{query}'")
-        try:
-            params = PARAMS.copy()
-            params["q"] = query
 
-            response = requests.get(
-                "https://api.sketchfab.com/v3/models",
-                headers=headers,
-                params=params,
-                timeout=30
-            )
-            response.raise_for_status()
-            models = response.json().get("results", [])
+def download_vase(model_id, model_name):
+    """Descarga un modelo en formato GLB"""
+    output_path = os.path.join(OUTPUT_DIR, f"{model_id}_{model_name}.glb")
 
-            for model in tqdm(models, desc="Procesando resultados"):
-                model_id = model["uid"]
+    # Verificar si ya existe
+    if os.path.exists(output_path):
+        return output_path
 
-                # Verificar si ya lo hemos procesado
-                if model_id in seen_models:
-                    continue
-                seen_models.add(model_id)
+    # Obtener URL de descarga
+    dl_url = f"https://api.sketchfab.com/v3/models/{model_id}/download"
+    headers = {"Authorization": f"Token {API_KEY}"}
+    response = requests.get(dl_url, headers=headers)
+    glb_url = response.json().get("glb", {}).get("url")
 
-                # Descargar el modelo
-                if download_model(model_id):
-                    downloaded += 1
-                    print(f"✅ Descargado: vase_{model_id}.glb")
+    if not glb_url:
+        print(f"No GLB disponible para {model_name}")
+        return None
 
+    # Descargar el archivo
+    print(f"Descargando: {model_name}")
+    with requests.get(glb_url, stream=True) as r:
+        r.raise_for_status()
+        with open(output_path, 'wb') as f, tqdm(
+                total=int(r.headers.get('content-length', 0)),
+                unit='B', unit_scale=True) as bar:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+                bar.update(len(chunk))
+
+    return output_path
+
+
+def collect_vases(max_models=50):
+    """Recolecta floreros desde Sketchfab"""
+    metadata = []
+    total_downloaded = 0
+
+    for term in SEARCH_TERMS:
+        print(f"\nBuscando: '{term}'")
+        offset = 0
+
+        while total_downloaded < max_models:
+            try:
+                result = get_models(term, offset)
+                models = result.get("results", [])
+
+                if not models:
+                    print(f"No más resultados para '{term}'")
+                    break
+
+                for model in models:
+                    model_id = model["uid"]
+                    model_name = model["name"].replace(" ", "_")[:50]
+
+                    # Verificar que sea apropiado para impresión 3D
+                    is_printable = any(tag.lower() in ["printable", "3d print", "3d printing"]
+                                       for tag in model.get("tags", []))
+
+                    # Descargar el modelo
+                    file_path = download_vase(model_id, model_name)
+
+                    if file_path:
+                        metadata.append({
+                            "id": model_id,
+                            "name": model["name"],
+                            "file": os.path.basename(file_path),
+                            "printable": is_printable,
+                            "faces": model.get("faceCount"),
+                            "vertices": model.get("vertexCount"),
+                            "url": model.get("viewerUrl")
+                        })
+                        total_downloaded += 1
+
+                        if total_downloaded >= max_models:
+                            break
+
+                # Pasar a la siguiente página
+                offset += len(models)
                 time.sleep(1.5)  # Respetar rate limits
 
-        except Exception as e:
-            print(f"Error en búsqueda '{query}': {str(e)[:100]}")
+            except Exception as e:
+                print(f"Error procesando '{term}': {str(e)}")
+                break
 
-    return downloaded
+    # Guardar metadata
+    with open(os.path.join(OUTPUT_DIR, "vases_metadata.json"), 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"\nCompletado. {total_downloaded} floreros descargados.")
+    return metadata
 
 
 if __name__ == "__main__":
-    print("🚀 Iniciando descarga de jarrones...")
-    total = fetch_vase_models()
-    print(f"\n🎉 Descarga completada! {total} jarrones guardados en:")
-    print(OUTPUT_DIR)
+    collect_vases(max_models=100)
