@@ -1,4 +1,4 @@
-# Mejora de vase_labeling_tool.py
+# enhanced_vase_labeling_tool.py corregido
 import os
 import csv
 import sys
@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import time  # Importar time para time.time()
 
 
 class EnhancedVaseLabelingTool:
@@ -329,8 +330,11 @@ class EnhancedVaseLabelingTool:
         filtered = len(self.filtered_files)
         labeled = sum(1 for f in [os.path.basename(f) for f in self.model_files] if f in self.metadata)
 
-        self.status_var.set(
-            f"Total: {total} | Filtrados: {filtered} | Etiquetados: {labeled} ({labeled / total * 100:.1f}%)")
+        if total > 0:
+            self.status_var.set(
+                f"Total: {total} | Filtrados: {filtered} | Etiquetados: {labeled} ({labeled / total * 100:.1f}%)")
+        else:
+            self.status_var.set("No se encontraron modelos")
 
     def apply_filters(self):
         """Aplica filtros a la lista de archivos"""
@@ -478,61 +482,58 @@ class EnhancedVaseLabelingTool:
             self.root.config(cursor="")
 
     def visualize_model(self, view="iso"):
-        """Visualiza el modelo actual"""
+        """Visualiza el modelo actual usando matplotlib"""
         if self.current_model is None:
             return
 
-        # Guardar la vista actual para poder reusarla
-        self.current_view = view
-
-        # Limpiar figura actual
+        # Limpiar figura anterior
         self.fig.clear()
+        ax = self.fig.add_subplot(111, projection='3d')
 
-        # Crear escena
-        scene = trimesh.Scene(self.current_model)
+        try:
+            # Mostrar la malla 3D
+            vertices = self.current_model.vertices
+            faces = self.current_model.faces
 
-        # Configurar vista según parámetro
-        if view == "front":
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                np.pi / 2, [0, 1, 0], scene.centroid)
-            title = "Vista Frontal"
-        elif view == "top":
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                np.pi / 2, [1, 0, 0], scene.centroid)
-            title = "Vista Superior"
-        elif view == "side":
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                0, [0, 1, 0], scene.centroid)
-            title = "Vista Lateral"
-        elif view == "rotate":
-            # Rotación en el eje Y
-            angle
-            # Rotación en el eje Y
-            angle = int(time.time()) % 360  # Rotación basada en tiempo
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                np.radians(angle), [0, 1, 0], scene.centroid)
-            title = "Vista Rotada"
-        else:  # Isométrica por defecto
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                np.pi / 4, [1, 0, 0], scene.centroid)
-            scene.camera_transform = trimesh.transformations.rotation_matrix(
-                np.pi / 4, [0, 0, 1], scene.centroid).dot(scene.camera_transform)
-            title = "Vista Isométrica"
+            # Crear polígonos
+            poly3d = [[vertices[vertex] for vertex in face] for face in faces]
 
-            # Crear una única vista
-        ax = self.fig.add_subplot(111)
-        ax.set_title(title)
+            # Usar Poly3DCollection para mejor rendimiento con modelos grandes
+            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+            mesh = Poly3DCollection(poly3d, alpha=0.5, linewidths=0.5, edgecolor='#555555')
+            mesh.set_facecolor('#1e88e5')  # Color azul
+            ax.add_collection3d(mesh)
 
-        # Generar imagen
-        img = scene.save_image(resolution=[800, 800])
-        from PIL import Image
-        import io
-        ax.imshow(np.array(Image.open(io.BytesIO(img))))
-        ax.axis('off')
+            # Autoescalar la vista
+            scale = self.current_model.vertices.flatten()
+            ax.auto_scale_xyz(scale, scale, scale)
 
-        self.fig.tight_layout()
-        self.canvas.draw()
+            # Configurar vista
+            if view == "front":
+                ax.view_init(elev=0, azim=0)
+            elif view == "top":
+                ax.view_init(elev=90, azim=0)
+            elif view == "side":
+                ax.view_init(elev=0, azim=90)
+            else:  # vista isométrica por defecto
+                ax.view_init(elev=30, azim=45)
 
+            ax.set_title(os.path.basename(self.filtered_files[self.current_model_index]))
+            ax.set_xlabel('X')
+            ax.set_ylabel('Y')
+            ax.set_zlabel('Z')
+
+            self.fig.tight_layout()
+            self.canvas.draw()
+
+        except Exception as e:
+            messagebox.showerror("Error de visualización", f"No se pudo visualizar el modelo: {str(e)}")
+            # Mostrar mensaje de error en el lienzo
+            self.fig.clear()
+            ax = self.fig.add_subplot(111)
+            ax.text(0.5, 0.5, f"Error al visualizar:\n{str(e)}",
+                    ha='center', va='center')
+            self.canvas.draw()
     def change_view(self, view):
         """Cambia la vista del modelo"""
         self.visualize_model(view)
@@ -555,6 +556,7 @@ class EnhancedVaseLabelingTool:
         self.txt_tags.delete(0, tk.END)
         self.txt_notes.delete("1.0", tk.END)
 
+        # Cargar datos existentes si los hay
         # Cargar datos existentes si los hay
         if filename in self.metadata:
             data = self.metadata[filename]
@@ -668,9 +670,9 @@ class EnhancedVaseLabelingTool:
 
         # Complejidad basada en número de caras
         faces = len(self.current_model.faces)
-        if faces < 2000:
+        if faces < 5000:
             properties['complexity'] = self.complexity_levels[0]  # Simple
-        elif faces < 10000:
+        elif faces < 20000:
             properties['complexity'] = self.complexity_levels[1]  # Media
         elif faces < 50000:
             properties['complexity'] = self.complexity_levels[2]  # Compleja
@@ -804,34 +806,34 @@ class EnhancedVaseLabelingTool:
         # Botón para cerrar
         ttk.Button(stats_window, text="Cerrar", command=stats_window.destroy).pack(pady=10)
 
-    def main():
-        # Obtener argumentos
-        if len(sys.argv) > 2:
-            models_dir = sys.argv[1]
-            metadata_file = sys.argv[2]
-        else:
-            # Mostrar diálogo para seleccionar directorio y archivo
-            root = tk.Tk()
-            root.withdraw()  # Ocultar ventana principal
-
-            # Seleccionar directorio
-            models_dir = filedialog.askdirectory(title="Seleccione el directorio con modelos 3D")
-            if not models_dir:
-                return
-
-            # Seleccionar archivo de metadatos
-            metadata_file = filedialog.asksaveasfilename(
-                title="Seleccione o cree archivo de metadatos",
-                defaultextension=".csv",
-                filetypes=[("CSV", "*.csv"), ("JSON", "*.json")]
-            )
-            if not metadata_file:
-                return
-
-        # Crear y ejecutar aplicación
+def main():
+    # Obtener argumentos
+    if len(sys.argv) > 2:
+        models_dir = sys.argv[1]
+        metadata_file = sys.argv[2]
+    else:
+        # Mostrar diálogo para seleccionar directorio y archivo
         root = tk.Tk()
-        app = EnhancedVaseLabelingTool(root, models_dir, metadata_file)
-        root.mainloop()
+        root.withdraw()  # Ocultar ventana principal
 
-    if __name__ == "__main__":
-        main()
+        # Seleccionar directorio
+        models_dir = filedialog.askdirectory(title="Seleccione el directorio con modelos 3D")
+        if not models_dir:
+            return
+
+        # Seleccionar archivo de metadatos
+        metadata_file = filedialog.asksaveasfilename(
+            title="Seleccione o cree archivo de metadatos",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("JSON", "*.json")]
+        )
+        if not metadata_file:
+            return
+
+    # Crear y ejecutar aplicación
+    root = tk.Tk()
+    app = EnhancedVaseLabelingTool(root, models_dir, metadata_file)
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()
